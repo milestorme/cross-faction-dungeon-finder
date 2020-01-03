@@ -8,3 +8,5 @@ Cross Faction Dungeon Finder patch
     b. Then do git apply cfdf.patch 
 2. Re-run cmake and launch a clean build of AzerothCore.
 ```
+## Credits
+* [Ali Khazaee](https://github.com/Ali-Khazaee).
