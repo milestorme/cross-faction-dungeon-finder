@@ -1,0 +1,596 @@
+From 42e88c48d6e2000ca6790a6e1077e0540e1ec167 Mon Sep 17 00:00:00 2001
+From: Ali Khazaee <dev.khazaee@gmail.com>
+Date: Thu, 15 Aug 2019 16:47:03 +0430
+Subject: [PATCH 1/5] CFD
+
+---
+ src/server/game/DungeonFinding/LFGMgr.cpp     | 60 ++++++++++++++++++-
+ src/server/game/DungeonFinding/LFGScripts.cpp | 29 +++++++++
+ src/server/game/Handlers/ChatHandler.cpp      | 15 +++++
+ src/server/game/World/World.cpp               |  1 +
+ src/server/game/World/World.h                 |  1 +
+ src/server/worldserver/worldserver.conf.dist  |  8 +++
+ 6 files changed, 112 insertions(+), 2 deletions(-)
+
+diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
+index 95a7aec98f..992bf60ea7 100644
+--- a/src/server/game/DungeonFinding/LFGMgr.cpp
++++ b/src/server/game/DungeonFinding/LFGMgr.cpp
+@@ -1927,6 +1927,33 @@ void LFGMgr::TeleportPlayer(Player* player, bool out, bool fromOpcode /*= false*
+         if (player->GetMapId() == uint32(dungeon->map))
+             player->TeleportToEntryPoint();
+ 
++        uint8 RealRace = player->getRace(true);
++
++        player->setRace(RealRace);
++        player->setTeamId(player->TeamIdForRace(RealRace));
++
++        ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(RealRace);
++        player->setFaction(CharRace ? CharRace->FactionID : 0);
++
++        if (group)
++        {
++            for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
++            {
++                if (Player* player2 = itr->GetSource())
++                {
++                    WorldPacket Data(SMSG_INVALIDATE_PLAYER, 8);
++                    Data << player2->GetGUID();
++                    player->GetSession()->SendPacket(&Data);
++                    player->GetSession()->SendNameQueryOpcode(player2->GetGUID());
++
++                    WorldPacket Data2(SMSG_INVALIDATE_PLAYER, 8);
++                    Data2 << player->GetGUID();
++                    player2->GetSession()->SendPacket(&Data2);
++                    player2->GetSession()->SendNameQueryOpcode(player->GetGUID());
++                }
++            }
++        }
++
+         return;
+     }
+ 
+@@ -1971,7 +1998,36 @@ void LFGMgr::TeleportPlayer(Player* player, bool out, bool fromOpcode /*= false*
+         if (!player->GetMap()->IsDungeon())
+             player->SetEntryPoint();
+ 
+-        if (!player->TeleportTo(mapid, x, y, z, orientation))
++        if (player->TeleportTo(mapid, x, y, z, orientation) && group)
++        {
++            if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
++            {
++                uint8 LeaderRace = leader->getRace();
++
++                player->setRace(LeaderRace);
++                player->setTeamId(leader->TeamIdForRace(LeaderRace));
++
++                ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
++                player->setFaction(CharRace ? CharRace->FactionID : 0);
++            }
++
++            for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
++            {
++                if (Player* player2 = itr->GetSource())
++                {
++                    WorldPacket Data(SMSG_INVALIDATE_PLAYER, 8);
++                    Data << player2->GetGUID();
++                    player->GetSession()->SendPacket(&Data);
++                    player->GetSession()->SendNameQueryOpcode(player2->GetGUID());
++
++                    WorldPacket Data2(SMSG_INVALIDATE_PLAYER, 8);
++                    Data2 << player->GetGUID();
++                    player2->GetSession()->SendPacket(&Data2);
++                    player2->GetSession()->SendNameQueryOpcode(player->GetGUID());
++                }
++            }
++        }
++        else
+             error = LFG_TELEPORTERROR_INVALID_LOCATION;
+     }
+     else
+@@ -2396,7 +2452,7 @@ void LFGMgr::SetLeader(uint64 gguid, uint64 leader)
+ 
+ void LFGMgr::SetTeam(uint64 guid, TeamId teamId)
+ {
+-    if (sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP))
++    if (sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP) || sWorld->getBoolConfig(CONFIG_ALLOW_CROSSFACTION_DUNGEON))
+         teamId = TEAM_ALLIANCE; // @Not Sure About That TeamId is supposed to be uint8 Team = 0(@TrinityCore)
+ 
+     PlayersStore[guid].SetTeam(teamId);
+diff --git a/src/server/game/DungeonFinding/LFGScripts.cpp b/src/server/game/DungeonFinding/LFGScripts.cpp
+index 31420b2475..49f94678b7 100644
+--- a/src/server/game/DungeonFinding/LFGScripts.cpp
++++ b/src/server/game/DungeonFinding/LFGScripts.cpp
+@@ -71,6 +71,35 @@ void LFGPlayerScript::OnLogin(Player* player)
+             //    player->GetSession()->GetPlayerInfo().c_str(), GUID_LOPART(gguid2), GUID_LOPART(gguid));
+             sLFGMgr->SetupGroupMember(guid, group->GetGUID());
+         }
++
++        if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
++        {
++            uint8 LeaderRace = leader->getRace();
++
++            player->setRace(LeaderRace);
++            player->setTeamId(leader->TeamIdForRace(LeaderRace));
++
++            ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
++            player->setFaction(CharRace ? CharRace->FactionID : 0);
++        }
++
++        Group* group2 = player->GetGroup();
++
++        for (GroupReference* itr = group2->GetFirstMember(); itr != nullptr; itr = itr->next())
++        {
++            if (Player* player2 = itr->GetSource())
++            {
++                WorldPacket Data(SMSG_INVALIDATE_PLAYER, 8);
++                Data << player2->GetGUID();
++                player->GetSession()->SendPacket(&Data);
++                player->GetSession()->SendNameQueryOpcode(player2->GetGUID());
++
++                WorldPacket Data2(SMSG_INVALIDATE_PLAYER, 8);
++                Data2 << player->GetGUID();
++                player2->GetSession()->SendPacket(&Data2);
++                player2->GetSession()->SendNameQueryOpcode(player->GetGUID());
++            }
++        }
+     }
+ 
+     sLFGMgr->InitializeLockedDungeons(player);
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+index d70fb4ea39..a391c67436 100644
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
+@@ -352,6 +352,9 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recvData)
+                 return;
+             }
+ 
++            if (lang != LANG_ADDON && sender->GetMap()->IsDungeon())
++                lang = LANG_UNIVERSAL;
++
+             if (type == CHAT_MSG_SAY)
+                 sender->Say(msg, lang);
+             else if (type == CHAT_MSG_EMOTE)
+@@ -405,6 +408,9 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recvData)
+         case CHAT_MSG_PARTY:
+         case CHAT_MSG_PARTY_LEADER:
+         {
++            if (lang != LANG_ADDON && sender->GetMap()->IsDungeon())
++                lang = LANG_UNIVERSAL;
++
+             // if player is in battleground, he cannot say to battleground members by /p
+             Group* group = GetPlayer()->GetOriginalGroup();
+             if (!group)
+@@ -460,6 +466,9 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recvData)
+         } break;
+         case CHAT_MSG_RAID:
+         {
++            if (lang != LANG_ADDON && sender->GetMap()->IsDungeon())
++                lang = LANG_UNIVERSAL;
++
+             // if player is in battleground, he cannot say to battleground members by /ra
+             Group* group = GetPlayer()->GetOriginalGroup();
+             if (!group)
+@@ -480,6 +489,9 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recvData)
+         } break;
+         case CHAT_MSG_RAID_LEADER:
+         {
++            if (lang != LANG_ADDON && sender->GetMap()->IsDungeon())
++                lang = LANG_UNIVERSAL;
++
+             // if player is in battleground, he cannot say to battleground members by /ra
+             Group* group = GetPlayer()->GetOriginalGroup();
+             if (!group)
+@@ -500,6 +512,9 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recvData)
+         } break;
+         case CHAT_MSG_RAID_WARNING:
+         {
++            if (lang != LANG_ADDON && sender->GetMap()->IsDungeon())
++                lang = LANG_UNIVERSAL;
++
+             Group* group = GetPlayer()->GetGroup();
+             if (!group || !group->isRaidGroup() || !(group->IsLeader(GetPlayer()->GetGUID()) || group->IsAssistant(GetPlayer()->GetGUID())) || group->isBGGroup())
+                 return;
+diff --git a/src/server/game/World/World.cpp b/src/server/game/World/World.cpp
+index da62ad302f..546970adec 100644
+--- a/src/server/game/World/World.cpp
++++ b/src/server/game/World/World.cpp
+@@ -729,6 +729,7 @@ void World::LoadConfigSettings(bool reload)
+     m_bool_configs[CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHAT]    = sConfigMgr->GetBoolDefault("AllowTwoSide.Interaction.Chat", false);
+     m_bool_configs[CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHANNEL] = sConfigMgr->GetBoolDefault("AllowTwoSide.Interaction.Channel", false);
+     m_bool_configs[CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP]   = sConfigMgr->GetBoolDefault("AllowTwoSide.Interaction.Group", false);
++    m_bool_configs[CONFIG_ALLOW_CROSSFACTION_DUNGEON]         = sConfigMgr->GetBoolDefault("AllowTwoSide.DungeonFinder", false);
+     m_bool_configs[CONFIG_ALLOW_TWO_SIDE_INTERACTION_GUILD]   = sConfigMgr->GetBoolDefault("AllowTwoSide.Interaction.Guild", false);
+     m_bool_configs[CONFIG_ALLOW_TWO_SIDE_INTERACTION_AUCTION] = sConfigMgr->GetBoolDefault("AllowTwoSide.Interaction.Auction", false);
+     m_bool_configs[CONFIG_ALLOW_TWO_SIDE_INTERACTION_MAIL]    = sConfigMgr->GetBoolDefault("AllowTwoSide.Interaction.Mail", false);
+diff --git a/src/server/game/World/World.h b/src/server/game/World/World.h
+index 0b8269d4eb..02da76c0f8 100644
+--- a/src/server/game/World/World.h
++++ b/src/server/game/World/World.h
+@@ -84,6 +84,7 @@ enum WorldBoolConfigs
+     CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHAT,
+     CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHANNEL,
+     CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP,
++    CONFIG_ALLOW_CROSSFACTION_DUNGEON,
+     CONFIG_ALLOW_TWO_SIDE_INTERACTION_GUILD,
+     CONFIG_ALLOW_TWO_SIDE_INTERACTION_AUCTION,
+     CONFIG_ALLOW_TWO_SIDE_INTERACTION_MAIL,
+diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
+index 869a46d49b..395953dd0c 100644
+--- a/src/server/worldserver/worldserver.conf.dist
++++ b/src/server/worldserver/worldserver.conf.dist
+@@ -1649,6 +1649,14 @@ AllowTwoSide.Interaction.Channel = 0
+ 
+ AllowTwoSide.Interaction.Group = 0
+ 
++#
++#    AllowTwoSide.DungeonFinder
++#        Description: Allow both side joining dungeon between factions.
++#        Default:     0 - (Disabled)
++#                     1 - (Enabled)
++
++AllowTwoSide.DungeonFinder = 0
++
+ #
+ #    AllowTwoSide.Interaction.Guild
+ #        Description: Allow guild joining between factions.
+
+From 75d10f0b06cd220bf80b32d7273fa1789dd70798 Mon Sep 17 00:00:00 2001
+From: Ali Khazaee <dev.khazaee@gmail.com>
+Date: Thu, 15 Aug 2019 16:50:33 +0430
+Subject: [PATCH 2/5] Forgot To Add Config
+
+---
+ src/server/game/DungeonFinding/LFGMgr.cpp     | 82 ++++++++++---------
+ src/server/game/DungeonFinding/LFGScripts.cpp | 43 +++++-----
+ 2 files changed, 67 insertions(+), 58 deletions(-)
+
+diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
+index 992bf60ea7..e8c5f2e1bb 100644
+--- a/src/server/game/DungeonFinding/LFGMgr.cpp
++++ b/src/server/game/DungeonFinding/LFGMgr.cpp
+@@ -1927,29 +1927,32 @@ void LFGMgr::TeleportPlayer(Player* player, bool out, bool fromOpcode /*= false*
+         if (player->GetMapId() == uint32(dungeon->map))
+             player->TeleportToEntryPoint();
+ 
+-        uint8 RealRace = player->getRace(true);
++        if (sWorld->getBoolConfig(CONFIG_ALLOW_CROSSFACTION_DUNGEON))
++        {
++            uint8 RealRace = player->getRace(true);
+ 
+-        player->setRace(RealRace);
+-        player->setTeamId(player->TeamIdForRace(RealRace));
++            player->setRace(RealRace);
++            player->setTeamId(player->TeamIdForRace(RealRace));
+ 
+-        ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(RealRace);
+-        player->setFaction(CharRace ? CharRace->FactionID : 0);
++            ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(RealRace);
++            player->setFaction(CharRace ? CharRace->FactionID : 0);
+ 
+-        if (group)
+-        {
+-            for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
++            if (group)
+             {
+-                if (Player* player2 = itr->GetSource())
++                for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+                 {
+-                    WorldPacket Data(SMSG_INVALIDATE_PLAYER, 8);
+-                    Data << player2->GetGUID();
+-                    player->GetSession()->SendPacket(&Data);
+-                    player->GetSession()->SendNameQueryOpcode(player2->GetGUID());
+-
+-                    WorldPacket Data2(SMSG_INVALIDATE_PLAYER, 8);
+-                    Data2 << player->GetGUID();
+-                    player2->GetSession()->SendPacket(&Data2);
+-                    player2->GetSession()->SendNameQueryOpcode(player->GetGUID());
++                    if (Player* player2 = itr->GetSource())
++                    {
++                        WorldPacket Data(SMSG_INVALIDATE_PLAYER, 8);
++                        Data << player2->GetGUID();
++                        player->GetSession()->SendPacket(&Data);
++                        player->GetSession()->SendNameQueryOpcode(player2->GetGUID());
++
++                        WorldPacket Data2(SMSG_INVALIDATE_PLAYER, 8);
++                        Data2 << player->GetGUID();
++                        player2->GetSession()->SendPacket(&Data2);
++                        player2->GetSession()->SendNameQueryOpcode(player->GetGUID());
++                    }
+                 }
+             }
+         }
+@@ -1998,32 +2001,35 @@ void LFGMgr::TeleportPlayer(Player* player, bool out, bool fromOpcode /*= false*
+         if (!player->GetMap()->IsDungeon())
+             player->SetEntryPoint();
+ 
+-        if (player->TeleportTo(mapid, x, y, z, orientation) && group)
++        if (player->TeleportTo(mapid, x, y, z, orientation))
+         {
+-            if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
++            if (group && sWorld->getBoolConfig(CONFIG_ALLOW_CROSSFACTION_DUNGEON))
+             {
+-                uint8 LeaderRace = leader->getRace();
++                if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
++                {
++                    uint8 LeaderRace = leader->getRace();
+ 
+-                player->setRace(LeaderRace);
+-                player->setTeamId(leader->TeamIdForRace(LeaderRace));
++                    player->setRace(LeaderRace);
++                    player->setTeamId(leader->TeamIdForRace(LeaderRace));
+ 
+-                ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
+-                player->setFaction(CharRace ? CharRace->FactionID : 0);
+-            }
++                    ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
++                    player->setFaction(CharRace ? CharRace->FactionID : 0);
++                }
+ 
+-            for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+-            {
+-                if (Player* player2 = itr->GetSource())
++                for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+                 {
+-                    WorldPacket Data(SMSG_INVALIDATE_PLAYER, 8);
+-                    Data << player2->GetGUID();
+-                    player->GetSession()->SendPacket(&Data);
+-                    player->GetSession()->SendNameQueryOpcode(player2->GetGUID());
+-
+-                    WorldPacket Data2(SMSG_INVALIDATE_PLAYER, 8);
+-                    Data2 << player->GetGUID();
+-                    player2->GetSession()->SendPacket(&Data2);
+-                    player2->GetSession()->SendNameQueryOpcode(player->GetGUID());
++                    if (Player* player2 = itr->GetSource())
++                    {
++                        WorldPacket Data(SMSG_INVALIDATE_PLAYER, 8);
++                        Data << player2->GetGUID();
++                        player->GetSession()->SendPacket(&Data);
++                        player->GetSession()->SendNameQueryOpcode(player2->GetGUID());
++
++                        WorldPacket Data2(SMSG_INVALIDATE_PLAYER, 8);
++                        Data2 << player->GetGUID();
++                        player2->GetSession()->SendPacket(&Data2);
++                        player2->GetSession()->SendNameQueryOpcode(player->GetGUID());
++                    }
+                 }
+             }
+         }
+diff --git a/src/server/game/DungeonFinding/LFGScripts.cpp b/src/server/game/DungeonFinding/LFGScripts.cpp
+index 49f94678b7..4d715101f1 100644
+--- a/src/server/game/DungeonFinding/LFGScripts.cpp
++++ b/src/server/game/DungeonFinding/LFGScripts.cpp
+@@ -72,32 +72,35 @@ void LFGPlayerScript::OnLogin(Player* player)
+             sLFGMgr->SetupGroupMember(guid, group->GetGUID());
+         }
+ 
+-        if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
++        if (sWorld->getBoolConfig(CONFIG_ALLOW_CROSSFACTION_DUNGEON))
+         {
+-            uint8 LeaderRace = leader->getRace();
++            if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
++            {
++                uint8 LeaderRace = leader->getRace();
+ 
+-            player->setRace(LeaderRace);
+-            player->setTeamId(leader->TeamIdForRace(LeaderRace));
++                player->setRace(LeaderRace);
++                player->setTeamId(leader->TeamIdForRace(LeaderRace));
+ 
+-            ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
+-            player->setFaction(CharRace ? CharRace->FactionID : 0);
+-        }
++                ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
++                player->setFaction(CharRace ? CharRace->FactionID : 0);
++            }
+ 
+-        Group* group2 = player->GetGroup();
++            Group* group2 = player->GetGroup();
+ 
+-        for (GroupReference* itr = group2->GetFirstMember(); itr != nullptr; itr = itr->next())
+-        {
+-            if (Player* player2 = itr->GetSource())
++            for (GroupReference* itr = group2->GetFirstMember(); itr != nullptr; itr = itr->next())
+             {
+-                WorldPacket Data(SMSG_INVALIDATE_PLAYER, 8);
+-                Data << player2->GetGUID();
+-                player->GetSession()->SendPacket(&Data);
+-                player->GetSession()->SendNameQueryOpcode(player2->GetGUID());
+-
+-                WorldPacket Data2(SMSG_INVALIDATE_PLAYER, 8);
+-                Data2 << player->GetGUID();
+-                player2->GetSession()->SendPacket(&Data2);
+-                player2->GetSession()->SendNameQueryOpcode(player->GetGUID());
++                if (Player* player2 = itr->GetSource())
++                {
++                    WorldPacket Data(SMSG_INVALIDATE_PLAYER, 8);
++                    Data << player2->GetGUID();
++                    player->GetSession()->SendPacket(&Data);
++                    player->GetSession()->SendNameQueryOpcode(player2->GetGUID());
++
++                    WorldPacket Data2(SMSG_INVALIDATE_PLAYER, 8);
++                    Data2 << player->GetGUID();
++                    player2->GetSession()->SendPacket(&Data2);
++                    player2->GetSession()->SendNameQueryOpcode(player->GetGUID());
++                }
+             }
+         }
+     }
+
+From e082691d7b6b8c7ebcc271f133dee907ad1df880 Mon Sep 17 00:00:00 2001
+From: Ali Khazaee <dev.khazaee@gmail.com>
+Date: Fri, 16 Aug 2019 18:20:34 +0430
+Subject: [PATCH 3/5] Update Invite
+
+---
+ src/server/game/DungeonFinding/LFGMgr.cpp     | 18 ++++++++++--------
+ src/server/game/DungeonFinding/LFGScripts.cpp | 13 ++++++++-----
+ src/server/game/Entities/Player/Player.cpp    |  2 ++
+ src/server/game/Entities/Player/Player.h      |  1 +
+ 4 files changed, 21 insertions(+), 13 deletions(-)
+
+diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
+index e8c5f2e1bb..d9c0b86814 100644
+--- a/src/server/game/DungeonFinding/LFGMgr.cpp
++++ b/src/server/game/DungeonFinding/LFGMgr.cpp
+@@ -1933,9 +1933,7 @@ void LFGMgr::TeleportPlayer(Player* player, bool out, bool fromOpcode /*= false*
+ 
+             player->setRace(RealRace);
+             player->setTeamId(player->TeamIdForRace(RealRace));
+-
+-            ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(RealRace);
+-            player->setFaction(CharRace ? CharRace->FactionID : 0);
++            player->setFaction(player->OldFactionID);
+ 
+             if (group)
+             {
+@@ -2007,13 +2005,17 @@ void LFGMgr::TeleportPlayer(Player* player, bool out, bool fromOpcode /*= false*
+             {
+                 if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
+                 {
+-                    uint8 LeaderRace = leader->getRace();
++                    if (player->getFaction() != leader->getFaction())
++                    {
++                        uint8 LeaderRace = leader->getRace();
+ 
+-                    player->setRace(LeaderRace);
+-                    player->setTeamId(leader->TeamIdForRace(LeaderRace));
++                        player->OldFactionID = player->getFaction();
++                        player->setRace(LeaderRace);
++                        player->setTeamId(leader->TeamIdForRace(LeaderRace));
+ 
+-                    ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
+-                    player->setFaction(CharRace ? CharRace->FactionID : 0);
++                        ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
++                        player->setFaction(CharRace ? CharRace->FactionID : 0);
++                    }
+                 }
+ 
+                 for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+diff --git a/src/server/game/DungeonFinding/LFGScripts.cpp b/src/server/game/DungeonFinding/LFGScripts.cpp
+index 4d715101f1..32d2207996 100644
+--- a/src/server/game/DungeonFinding/LFGScripts.cpp
++++ b/src/server/game/DungeonFinding/LFGScripts.cpp
+@@ -76,13 +76,16 @@ void LFGPlayerScript::OnLogin(Player* player)
+         {
+             if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
+             {
+-                uint8 LeaderRace = leader->getRace();
++                if (player->getFaction() != leader->getFaction())
++                {
++                    uint8 LeaderRace = leader->getRace();
+ 
+-                player->setRace(LeaderRace);
+-                player->setTeamId(leader->TeamIdForRace(LeaderRace));
++                    player->setRace(LeaderRace);
++                    player->setTeamId(leader->TeamIdForRace(LeaderRace));
+ 
+-                ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
+-                player->setFaction(CharRace ? CharRace->FactionID : 0);
++                    ChrRacesEntry const* CharRace = sChrRacesStore.LookupEntry(LeaderRace);
++                    player->setFaction(CharRace ? CharRace->FactionID : 0);
++                }
+             }
+ 
+             Group* group2 = player->GetGroup();
+diff --git a/src/server/game/Entities/Player/Player.cpp b/src/server/game/Entities/Player/Player.cpp
+index c3b9998088..beaf42ac37 100644
+--- a/src/server/game/Entities/Player/Player.cpp
++++ b/src/server/game/Entities/Player/Player.cpp
+@@ -676,6 +676,8 @@ Player::Player(WorldSession* session): Unit(true), m_mover(this)
+ #pragma warning(default:4355)
+ #endif
+ 
++    OldFactionID = 0;
++
+     m_drwGUID = 0;
+     m_speakTime = 0;
+     m_speakCount = 0;
+diff --git a/src/server/game/Entities/Player/Player.h b/src/server/game/Entities/Player/Player.h
+index 09fb52a6ed..3188347681 100644
+--- a/src/server/game/Entities/Player/Player.h
++++ b/src/server/game/Entities/Player/Player.h
+@@ -2615,6 +2615,7 @@ class Player : public Unit, public GridObject<Player>
+         uint32 GetNextSave() const { return m_nextSave; }
+         SpellModList const& GetSpellModList(uint32 type) const { return m_spellMods[type]; }
+ 
++        uint32 OldFactionID;
+     protected:
+         // Gamemaster whisper whitelist
+         WhisperListContainer WhisperList;
+
+From bff548d19788e6872ee3e5f9097a55e4534e1fed Mon Sep 17 00:00:00 2001
+From: Ali Khazaee <dev.khazaee@gmail.com>
+Date: Fri, 16 Aug 2019 18:24:04 +0430
+Subject: [PATCH 4/5] Forgot
+
+---
+ src/server/game/DungeonFinding/LFGMgr.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
+index d9c0b86814..3c68bae9d0 100644
+--- a/src/server/game/DungeonFinding/LFGMgr.cpp
++++ b/src/server/game/DungeonFinding/LFGMgr.cpp
+@@ -2001,6 +2001,8 @@ void LFGMgr::TeleportPlayer(Player* player, bool out, bool fromOpcode /*= false*
+ 
+         if (player->TeleportTo(mapid, x, y, z, orientation))
+         {
++            player->OldFactionID = player->getFaction();
++
+             if (group && sWorld->getBoolConfig(CONFIG_ALLOW_CROSSFACTION_DUNGEON))
+             {
+                 if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
+@@ -2009,7 +2011,6 @@ void LFGMgr::TeleportPlayer(Player* player, bool out, bool fromOpcode /*= false*
+                     {
+                         uint8 LeaderRace = leader->getRace();
+ 
+-                        player->OldFactionID = player->getFaction();
+                         player->setRace(LeaderRace);
+                         player->setTeamId(leader->TeamIdForRace(LeaderRace));
+ 
+
+From 8089cb7f7f6e94210dd7f20b687630646786562c Mon Sep 17 00:00:00 2001
+From: Ali Khazaee <dev.khazaee@gmail.com>
+Date: Fri, 16 Aug 2019 19:44:02 +0430
+Subject: [PATCH 5/5] Update
+
+---
+ src/server/game/DungeonFinding/LFGMgr.cpp  | 2 --
+ src/server/game/Entities/Player/Player.cpp | 3 +++
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
+index 3c68bae9d0..7fc218ee45 100644
+--- a/src/server/game/DungeonFinding/LFGMgr.cpp
++++ b/src/server/game/DungeonFinding/LFGMgr.cpp
+@@ -2001,8 +2001,6 @@ void LFGMgr::TeleportPlayer(Player* player, bool out, bool fromOpcode /*= false*
+ 
+         if (player->TeleportTo(mapid, x, y, z, orientation))
+         {
+-            player->OldFactionID = player->getFaction();
+-
+             if (group && sWorld->getBoolConfig(CONFIG_ALLOW_CROSSFACTION_DUNGEON))
+             {
+                 if (Player* leader = ObjectAccessor::FindPlayerInOrOutOfWorld(group->GetLeaderGUID()))
+diff --git a/src/server/game/Entities/Player/Player.cpp b/src/server/game/Entities/Player/Player.cpp
+index beaf42ac37..e5cda0ddac 100644
+--- a/src/server/game/Entities/Player/Player.cpp
++++ b/src/server/game/Entities/Player/Player.cpp
+@@ -1218,6 +1218,7 @@ bool Player::Create(uint32 guidlow, CharacterCreateInfo* createInfo)
+ 
+     CheckAllAchievementCriteria();
+ 
++    OldFactionID = getFaction();
+     return true;
+ }
+ 
+@@ -18409,6 +18410,8 @@ bool Player::LoadFromDB(uint32 guid, SQLQueryHolder *holder)
+         if (!HasAuraState((AuraStateType)m_spellInfo->CasterAuraState))
+             aura->HandleAllEffects(itr->second, AURA_EFFECT_HANDLE_REAL, false);
+     }
++
++    OldFactionID = getFaction();
+     return true;
+ }
+ 
