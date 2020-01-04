@@ -1,17 +1,3 @@
-From 42e88c48d6e2000ca6790a6e1077e0540e1ec167 Mon Sep 17 00:00:00 2001
-From: Ali Khazaee <dev.khazaee@gmail.com>
-Date: Thu, 15 Aug 2019 16:47:03 +0430
-Subject: [PATCH 1/5] CFD
-
----
- src/server/game/DungeonFinding/LFGMgr.cpp     | 60 ++++++++++++++++++-
- src/server/game/DungeonFinding/LFGScripts.cpp | 29 +++++++++
- src/server/game/Handlers/ChatHandler.cpp      | 15 +++++
- src/server/game/World/World.cpp               |  1 +
- src/server/game/World/World.h                 |  1 +
- src/server/worldserver/worldserver.conf.dist  |  8 +++
- 6 files changed, 112 insertions(+), 2 deletions(-)
-
 diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
 index 95a7aec98f..992bf60ea7 100644
 --- a/src/server/game/DungeonFinding/LFGMgr.cpp
@@ -234,17 +220,6 @@ index 869a46d49b..395953dd0c 100644
  #
  #    AllowTwoSide.Interaction.Guild
  #        Description: Allow guild joining between factions.
-
-From 75d10f0b06cd220bf80b32d7273fa1789dd70798 Mon Sep 17 00:00:00 2001
-From: Ali Khazaee <dev.khazaee@gmail.com>
-Date: Thu, 15 Aug 2019 16:50:33 +0430
-Subject: [PATCH 2/5] Forgot To Add Config
-
----
- src/server/game/DungeonFinding/LFGMgr.cpp     | 82 ++++++++++---------
- src/server/game/DungeonFinding/LFGScripts.cpp | 43 +++++-----
- 2 files changed, 67 insertions(+), 58 deletions(-)
-
 diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
 index 992bf60ea7..e8c5f2e1bb 100644
 --- a/src/server/game/DungeonFinding/LFGMgr.cpp
@@ -416,19 +391,6 @@ index 49f94678b7..4d715101f1 100644
              }
          }
      }
-
-From e082691d7b6b8c7ebcc271f133dee907ad1df880 Mon Sep 17 00:00:00 2001
-From: Ali Khazaee <dev.khazaee@gmail.com>
-Date: Fri, 16 Aug 2019 18:20:34 +0430
-Subject: [PATCH 3/5] Update Invite
-
----
- src/server/game/DungeonFinding/LFGMgr.cpp     | 18 ++++++++++--------
- src/server/game/DungeonFinding/LFGScripts.cpp | 13 ++++++++-----
- src/server/game/Entities/Player/Player.cpp    |  2 ++
- src/server/game/Entities/Player/Player.h      |  1 +
- 4 files changed, 21 insertions(+), 13 deletions(-)
-
 diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
 index e8c5f2e1bb..d9c0b86814 100644
 --- a/src/server/game/DungeonFinding/LFGMgr.cpp
@@ -518,16 +480,6 @@ index 09fb52a6ed..3188347681 100644
      protected:
          // Gamemaster whisper whitelist
          WhisperListContainer WhisperList;
-
-From bff548d19788e6872ee3e5f9097a55e4534e1fed Mon Sep 17 00:00:00 2001
-From: Ali Khazaee <dev.khazaee@gmail.com>
-Date: Fri, 16 Aug 2019 18:24:04 +0430
-Subject: [PATCH 4/5] Forgot
-
----
- src/server/game/DungeonFinding/LFGMgr.cpp | 3 ++-
- 1 file changed, 2 insertions(+), 1 deletion(-)
-
 diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
 index d9c0b86814..3c68bae9d0 100644
 --- a/src/server/game/DungeonFinding/LFGMgr.cpp
@@ -548,18 +500,6 @@ index d9c0b86814..3c68bae9d0 100644
 -                        player->OldFactionID = player->getFaction();
                          player->setRace(LeaderRace);
                          player->setTeamId(leader->TeamIdForRace(LeaderRace));
- 
-
-From 8089cb7f7f6e94210dd7f20b687630646786562c Mon Sep 17 00:00:00 2001
-From: Ali Khazaee <dev.khazaee@gmail.com>
-Date: Fri, 16 Aug 2019 19:44:02 +0430
-Subject: [PATCH 5/5] Update
-
----
- src/server/game/DungeonFinding/LFGMgr.cpp  | 2 --
- src/server/game/Entities/Player/Player.cpp | 3 +++
- 2 files changed, 3 insertions(+), 2 deletions(-)
-
 diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
 index 3c68bae9d0..7fc218ee45 100644
 --- a/src/server/game/DungeonFinding/LFGMgr.cpp
